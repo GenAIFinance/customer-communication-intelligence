@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────
+# Customer Communication Intelligence Platform
+# Central configuration — override with .env where needed
+# ─────────────────────────────────────────────
+
+project:
+  name: "Customer Communication Intelligence Platform"
+  version: "1.0.0"
+  description: "MVP portfolio demo — synthetic data only"
+
+data:
+  duckdb_path: "data/processed/communications.duckdb"
+  table_name: "customer_communications"
+  raw_csv_path: "data/raw/communications_raw.csv"
+  processed_csv_path: "data/processed/communications_processed.csv"
+  synthetic_row_count: 5000
+  random_seed: 42
+
+segments:
+  - Premium
+  - Standard
+  - Basic
+
+product_types:
+  - Auto
+  - Home
+  - Life
+  - Health
+
+channels:
+  - Email
+  - SMS
+  - Phone
+  - Direct Mail
+
+premium_buckets:
+  - Low
+  - Mid
+  - High
+
+campaigns:
+  count: 10                  # number of synthetic campaign IDs
+  prefix: "CAMP"
+
+sentiment_labels:
+  - positive
+  - neutral
+  - negative
+  - mixed
+
+target:
+  column: "needs_intervention"
+  # Rule: flag = 1 when engagement weak AND/OR complaint/escalation risk elevated
+  engagement_threshold: 0.25
+  days_since_contact_threshold: 120
+
+anomaly:
+  engagement_drop_threshold: 0.15    # 15% week-over-week drop triggers flag
+  complaint_zscore_threshold: 2.0    # z-score above 2.0 triggers complaint spike
+  campaign_open_rate_ratio: 0.50     # campaign open rate < 50% of median triggers flag
+
+model:
+  type: "RandomForestClassifier"
+  test_size: 0.2
+  n_estimators: 100
+  max_depth: 6
+  random_state: 42
+  model_output_path: "data/processed/model.joblib"
+  threshold: 0.45                    # probability threshold for intervention flag
+
+genai:
+  model: "gpt-3.5-turbo"
+  max_tokens: 250
+  temperature: 0.4
+  use_stub_if_no_key: true
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  title: "Customer Communication Intelligence API"
+  version: "1.0.0"
+
+streamlit:
+  port: 8501
+  page_title: "Customer Comm Intelligence"
+  layout: "wide"
