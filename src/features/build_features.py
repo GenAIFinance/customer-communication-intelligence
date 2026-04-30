@@ -48,15 +48,16 @@ TARGET = "needs_intervention"
 
 # ── Feature engineering functions ─────────────────────────────────────────────
 
-def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+def encode_categoricals(df: pd.DataFrame, drop_first: bool = True) -> pd.DataFrame:
     """
     One-hot encode categorical columns.
 
-    Drops the first category to avoid multicollinearity.
-    Resulting columns are prefixed with the original column name.
-
     Args:
-        df: DataFrame containing categorical columns.
+        df:         DataFrame containing categorical columns.
+        drop_first: If True (default for training), drop first level per category
+                    to avoid multicollinearity. Set False for single-row inference
+                    so the one observed level is not silently dropped — _align_features
+                    will remove any baseline columns not in the training schema.
 
     Returns:
         DataFrame with original categoricals replaced by dummy columns.
@@ -64,7 +65,7 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     dummies = pd.get_dummies(
         df[CATEGORICAL_FEATURES],
-        drop_first=True,
+        drop_first=drop_first,
         dtype=int,
     )
     df = df.drop(columns=CATEGORICAL_FEATURES)

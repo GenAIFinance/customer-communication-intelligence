@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.features.build_features import build_features, CATEGORICAL_FEATURES, TARGET
+from src.features.build_features import build_features, encode_categoricals, add_interaction_features, drop_non_features, CATEGORICAL_FEATURES, TARGET
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -115,6 +115,64 @@ def _load_feature_names_from_artifact(model_path: str | None = None) -> list[str
     return joblib.load(names_path)
 
 
+def _feature_names_from_model(model) -> list[str] | None:
+    """
+    Extract feature names from a fitted sklearn model if available.
+
+    sklearn sets feature_names_in_ on any model fitted with a named DataFrame.
+    This avoids a disk read entirely for in-memory models (fix #2).
+
+    Args:
+        model: Fitted sklearn estimator.
+
+    Returns:
+        List of feature names, or None if the attribute is not present.
+    """
+    names = getattr(model, "feature_names_in_", None)
+    return list(names) if names is not None else None
+
+
+def _resolve_feature_names(
+    model,
+    model_path: str | None,
+    expected_columns: list[str] | None,
+) -> list[str]:
+    """
+    Resolve feature column names using the best available source.
+
+    Priority order (fix #2):
+      1. Caller-supplied expected_columns  — always preferred
+      2. model.feature_names_in_           — in-memory, no disk I/O
+      3. _features.joblib artifact         — disk fallback
+
+    Args:
+        model:            Fitted sklearn estimator.
+        model_path:       Path to model artifact (for disk fallback).
+        expected_columns: Caller-supplied columns (may be None).
+
+    Returns:
+        Resolved list of feature column names.
+
+    Raises:
+        RuntimeError: If no source can provide feature names.
+    """
+    if expected_columns is not None:
+        return expected_columns
+
+    from_model = _feature_names_from_model(model)
+    if from_model is not None:
+        return from_model
+
+    try:
+        return _load_feature_names_from_artifact(model_path)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Cannot resolve feature names. Provide expected_columns, "
+            "use a model fitted on a named DataFrame, "
+            "or ensure the _features.joblib artifact exists."
+        )
+
+
 # ── Feature preparation helpers ────────────────────────────────────────────────
 
 def _align_features(df: pd.DataFrame, expected_columns: list[str]) -> pd.DataFrame:
@@ -190,7 +248,13 @@ def _prepare_single(customer: dict, expected_columns: list[str]) -> pd.DataFrame
         if col in df.columns:
             df[col] = df[col].astype(str)
 
-    X, _ = build_features(df)
+    # FIX #1: use drop_first=False so the single observed category level is
+    # preserved as a dummy column. _align_features then drops baseline columns
+    # (those absent from training schema) and fills any missing ones with 0.
+    # Using drop_first=True on a single row silently zeros all categoricals.
+    df = add_interaction_features(df)
+    df = encode_categoricals(df, drop_first=False)
+    X = drop_non_features(df)
     return _align_features(X, expected_columns)
 
 
@@ -224,9 +288,8 @@ def score_customer(
     if model is None:
         model = load_model(model_path)
 
-    # FIX #3: use persisted training schema — not a DB sample
-    if expected_columns is None:
-        expected_columns = _load_feature_names_from_artifact(model_path)
+    # Use best available source: caller-supplied → model attr → disk artifact
+    expected_columns = _resolve_feature_names(model, model_path, expected_columns)
 
     X = _prepare_single(customer, expected_columns)
     proba = float(model.predict_proba(X)[0, 1])
@@ -273,15 +336,12 @@ def score_batch(
     cfg = _load_config()
     threshold = cfg["model"]["threshold"]
 
-    # FIX #2: only hit the artifact when model itself comes from disk
     if model is None:
         model = load_model(model_path)
-        if expected_columns is None:
-            expected_columns = _load_feature_names_from_artifact(model_path)
-    else:
-        if expected_columns is None:
-            # Model provided in-memory but no columns given — try artifact
-            expected_columns = _load_feature_names_from_artifact(model_path)
+
+    # FIX #2: resolve feature names without requiring disk access when the
+    # fitted model already carries feature_names_in_ metadata
+    expected_columns = _resolve_feature_names(model, model_path, expected_columns)
 
     # FIX #1: inject dummy target so build_features doesn't KeyError
     df_input = _inject_target_if_missing(df)
