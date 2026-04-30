@@ -249,6 +249,27 @@ class TestGenerateSummary:
         )
         assert isinstance(result.summary, str)
 
+
+    def test_transient_error_falls_back_to_stub(self, high_risk_customer, monkeypatch):
+        """Transient API errors (timeout, rate limit) must fall back to stub."""
+        import src.genai.summarizer as mod
+        def fake_call(context, cfg):
+            raise Exception("Connection timeout after 30s")
+        monkeypatch.setattr(mod, "_call_openai", fake_call)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-key")
+        result = mod.generate_summary(high_risk_customer)
+        assert result.source == "stub"
+
+    def test_auth_error_raises(self, high_risk_customer, monkeypatch):
+        """Auth errors must re-raise so config problems are visible."""
+        import src.genai.summarizer as mod
+        def fake_call(context, cfg):
+            raise Exception("401 Unauthorized - invalid api key")
+        monkeypatch.setattr(mod, "_call_openai", fake_call)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-key")
+        with pytest.raises(Exception, match="401"):
+            mod.generate_summary(high_risk_customer)
+
     def test_stub_used_when_no_api_key(self, high_risk_customer, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         result = generate_summary(high_risk_customer)

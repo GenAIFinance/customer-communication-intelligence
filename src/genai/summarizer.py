@@ -145,6 +145,30 @@ def _call_openai(context: dict, cfg: dict) -> str:
 
 # ── Main summariser ────────────────────────────────────────────────────────────
 
+
+def _is_auth_error(exc: Exception) -> bool:
+    """
+    Return True if the exception indicates an auth/config problem
+    (invalid key, missing permissions) rather than a transient runtime
+    failure (timeout, rate limit, network error, server 5xx).
+
+    Auth errors should be re-raised so callers get a clear signal.
+    Transient errors should trigger stub fallback to keep the endpoint live.
+    """
+    try:
+        from openai import AuthenticationError, PermissionDeniedError
+        if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+            return True
+    except ImportError:
+        pass
+
+    # Fallback: inspect the message for auth-related keywords
+    msg = str(exc).lower()
+    auth_keywords = ("authentication", "invalid api key", "permission denied",
+                     "unauthorized", "401", "403")
+    return any(kw in msg for kw in auth_keywords)
+
+
 def generate_summary(
     customer: dict,
     score_result=None,
@@ -189,14 +213,20 @@ def generate_summary(
                 customer_id=customer_id,
             )
         except Exception as e:
-            # Only fall back to stub when config permits it.
-            # If use_stub_if_no_key is false, re-raise so the caller knows
-            # there is a real configuration error rather than silently
-            # returning template output.
-            if cfg["genai"].get("use_stub_if_no_key", True):
-                print(f"  [summarizer] OpenAI call failed ({type(e).__name__}: {e}). Using stub.")
-            else:
+            # Distinguish auth/config errors from transient runtime failures.
+            #
+            # Auth errors (wrong/missing key, permission denied) indicate a
+            # configuration problem — re-raise so the caller gets a clear
+            # signal rather than a silently degraded stub response.
+            #
+            # Transient errors (timeout, rate limit, network, server 5xx)
+            # should always fall back to stub so the endpoint stays available
+            # even during brief API outages. use_stub_if_no_key does NOT
+            # gate this path — it only controls the no-key scenario above.
+            auth_error = _is_auth_error(e)
+            if auth_error:
                 raise
+            print(f"  [summarizer] OpenAI transient error ({type(e).__name__}: {e}). Using stub.")
 
     # Stub fallback — always works, no external dependency
     summary = build_stub_summary(context)
