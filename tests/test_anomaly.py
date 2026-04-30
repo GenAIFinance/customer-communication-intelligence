@@ -335,6 +335,22 @@ class TestCodexFixes:
         assert isinstance(result, AnomalyResult)  # no crash is the main check
 
 
+
+    def test_empty_dataframe_no_crash(self):
+        """Empty input must return non-flagged result, not raise on NaT."""
+        import pandas as pd
+        empty_df = pd.DataFrame(columns=[
+            "sent_date", "segment", "engagement_score", "customer_id",
+            "product_type", "channel", "campaign_id", "opened", "clicked",
+            "response_flag", "complaint_flag", "escalation_flag",
+            "sentiment_text", "premium_bucket", "tenure_months",
+            "days_since_last_contact", "opt_out_flag", "needs_intervention",
+        ])
+        result = detect_segment_engagement_drop(empty_df)
+        assert isinstance(result, AnomalyResult)
+        assert result.flagged is False
+        assert len(result.summary) > 0
+
     def test_segment_drop_timestamp_normalization(self):
         """Segment drop detector must normalize timestamps like complaint spike does."""
         import pandas as pd

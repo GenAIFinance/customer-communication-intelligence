@@ -81,11 +81,29 @@ def detect_segment_engagement_drop(
     threshold = drop_threshold if drop_threshold is not None else cfg["anomaly"]["engagement_drop_threshold"]
 
     df = df.copy()
+
+    # Guard against empty input — max() on empty series returns NaT,
+    # which causes .date() to raise later when building metadata.
+    if df.empty:
+        return AnomalyResult(
+            detector="segment_engagement_drop",
+            summary="No data available for segment engagement analysis.",
+            metadata={"threshold": drop_threshold if drop_threshold is not None else "config"},
+        )
+
     # Normalize to calendar day — prevents timestamp-level grouping if
     # sent_date includes time-of-day components (mirrors complaint spike fix)
     df["sent_date"] = pd.to_datetime(df["sent_date"]).dt.normalize()
 
     today = df["sent_date"].max()
+
+    # Guard against NaT (all sent_date values were unparseable)
+    if pd.isnull(today):
+        return AnomalyResult(
+            detector="segment_engagement_drop",
+            summary="No valid dates found for segment engagement analysis.",
+            metadata={"threshold": drop_threshold if drop_threshold is not None else "config"},
+        )
     week_start     = today - timedelta(days=6)
     prev_week_start = today - timedelta(days=13)
     prev_week_end   = today - timedelta(days=7)
