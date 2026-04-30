@@ -77,18 +77,36 @@ def build_context(
         intervention_score = getattr(score_result, "intervention_score", 0.0)
         risk_band          = getattr(score_result, "risk_band", "Unknown")
 
+    def _safe_float(val, default: float = 0.0) -> float:
+        """Cast to float, returning default for None/NaN/unparseable values."""
+        try:
+            result = float(val)
+            import math
+            return default if math.isnan(result) else result
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(val, default: int = 0) -> int:
+        """Cast to int, returning default for None/NaN/unparseable values."""
+        try:
+            f = float(val)  # handle "1.0" strings and NaN
+            import math
+            return default if math.isnan(f) else int(f)
+        except (TypeError, ValueError):
+            return default
+
     return {
-        "customer_id":        customer.get("customer_id", "Unknown"),
-        "segment":            customer.get("segment", "Unknown"),
-        "channel":            customer.get("channel", "Unknown"),
-        "sentiment":          customer.get("sentiment_text", "neutral"),
-        "engagement_score":   float(customer.get("engagement_score", 0.0)),
-        "complaint_flag":     int(customer.get("complaint_flag", 0)),
-        "escalation_flag":    int(customer.get("escalation_flag", 0)),
-        "days_since_contact": int(customer.get("days_since_last_contact", 0)),
-        "intervention_score": float(intervention_score),
-        "risk_band":          risk_band,
-        "anomaly_summary":    anomaly_summary,
+        "customer_id":        customer.get("customer_id") or "Unknown",
+        "segment":            customer.get("segment") or "Unknown",
+        "channel":            customer.get("channel") or "Unknown",
+        "sentiment":          customer.get("sentiment_text") or "neutral",
+        "engagement_score":   _safe_float(customer.get("engagement_score"), 0.0),
+        "complaint_flag":     _safe_int(customer.get("complaint_flag"), 0),
+        "escalation_flag":    _safe_int(customer.get("escalation_flag"), 0),
+        "days_since_contact": _safe_int(customer.get("days_since_last_contact"), 0),
+        "intervention_score": _safe_float(intervention_score, 0.0),
+        "risk_band":          risk_band or "Unknown",
+        "anomaly_summary":    anomaly_summary or "",
     }
 
 
@@ -171,8 +189,14 @@ def generate_summary(
                 customer_id=customer_id,
             )
         except Exception as e:
-            # Log and fall through to stub
-            print(f"  [summarizer] OpenAI call failed ({type(e).__name__}: {e}). Using stub.")
+            # Only fall back to stub when config permits it.
+            # If use_stub_if_no_key is false, re-raise so the caller knows
+            # there is a real configuration error rather than silently
+            # returning template output.
+            if cfg["genai"].get("use_stub_if_no_key", True):
+                print(f"  [summarizer] OpenAI call failed ({type(e).__name__}: {e}). Using stub.")
+            else:
+                raise
 
     # Stub fallback — always works, no external dependency
     summary = build_stub_summary(context)

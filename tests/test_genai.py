@@ -149,6 +149,37 @@ class TestStubSummary:
 
 # ── build_context tests ────────────────────────────────────────────────────────
 
+
+    def test_null_engagement_score_no_crash(self):
+        """build_context must not raise on None numeric values."""
+        ctx = build_context({"customer_id": "C1", "engagement_score": None,
+                             "complaint_flag": None, "days_since_last_contact": None})
+        assert ctx["engagement_score"] == 0.0
+        assert ctx["complaint_flag"] == 0
+        assert ctx["days_since_contact"] == 0
+
+    def test_nan_values_no_crash(self):
+        """build_context must not raise on NaN numeric values."""
+        import math
+        ctx = build_context({"engagement_score": float("nan"), "complaint_flag": float("nan")})
+        assert ctx["engagement_score"] == 0.0
+        assert ctx["complaint_flag"] == 0
+
+    def test_unparseable_string_no_crash(self):
+        """build_context must not raise on unparseable string values."""
+        ctx = build_context({"engagement_score": "bad", "complaint_flag": "also_bad"})
+        assert ctx["engagement_score"] == 0.0
+        assert ctx["complaint_flag"] == 0
+
+    def test_null_customer_generates_summary(self):
+        """generate_summary must not crash when customer has None fields."""
+        result = generate_summary(
+            {"customer_id": "C_NULL", "engagement_score": None, "complaint_flag": None},
+            force_stub=True,
+        )
+        assert isinstance(result.summary, str)
+        assert len(result.summary) > 0
+
 class TestBuildContext:
 
     def test_returns_dict(self, high_risk_customer):
