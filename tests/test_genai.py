@@ -271,9 +271,21 @@ class TestGenerateSummary:
             mod.generate_summary(high_risk_customer)
 
     def test_stub_used_when_no_api_key(self, high_risk_customer, monkeypatch):
+        """No key + use_stub_if_no_key=true (default) → stub."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         result = generate_summary(high_risk_customer)
         assert result.source == "stub"
+
+    def test_no_key_config_false_raises(self, high_risk_customer, monkeypatch):
+        """No key + use_stub_if_no_key=false → RuntimeError immediately, no silent stub."""
+        import src.genai.summarizer as mod
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr(mod, "_load_config", lambda: {
+            "genai": {"use_stub_if_no_key": False, "model": "gpt-3.5-turbo",
+                      "max_tokens": 250, "temperature": 0.4}
+        })
+        with pytest.raises(RuntimeError, match="OPENAI_API_KEY is not set"):
+            generate_summary(high_risk_customer)
 
     def test_high_and_low_risk_produce_different_summaries(
         self, high_risk_customer, low_risk_customer, mock_score_result

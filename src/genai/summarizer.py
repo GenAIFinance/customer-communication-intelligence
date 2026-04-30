@@ -196,12 +196,20 @@ def generate_summary(
     customer_id = context["customer_id"]
 
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    # Only fall back to stub when:
-    #   1. force_stub=True (explicit override), OR
-    #   2. API key is missing AND config says to use stub as fallback
-    # When a key IS present, always attempt OpenAI regardless of config default.
     no_key = not api_key
-    use_stub = force_stub or (no_key and cfg["genai"].get("use_stub_if_no_key", True))
+    use_stub_if_no_key = cfg["genai"].get("use_stub_if_no_key", True)
+
+    # Raise immediately when key is missing and stub fallback is disabled.
+    # This surfaces the misconfiguration before any API call is attempted,
+    # avoiding a confusing "api_key client option must be set" error that
+    # _is_auth_error would not recognise as an auth failure.
+    if no_key and not use_stub_if_no_key and not force_stub:
+        raise RuntimeError(
+            "OPENAI_API_KEY is not set and genai.use_stub_if_no_key is false. "
+            "Set the API key or enable use_stub_if_no_key in config.yaml."
+        )
+
+    use_stub = force_stub or (no_key and use_stub_if_no_key)
 
     if not use_stub:
         try:
