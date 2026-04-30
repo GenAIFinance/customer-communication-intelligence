@@ -1,0 +1,45 @@
+# Environment — never commit API keys
+.env
+
+# Python cache — main source of merge conflicts
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# DuckDB files
+*.duckdb
+*.duckdb.wal
+
+# Data files — generate locally
+data/raw/*.csv
+data/raw/*.parquet
+data/processed/*.csv
+data/processed/*.parquet
+data/processed/*.joblib
+
+# Keep folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Power BI
+dashboard/powerbi/*.pbix
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Pytest cache
+.pytest_cache/
