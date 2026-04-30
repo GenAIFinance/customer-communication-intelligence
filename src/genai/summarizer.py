@@ -154,7 +154,12 @@ def generate_summary(
     customer_id = context["customer_id"]
 
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    use_stub = force_stub or not api_key or cfg["genai"].get("use_stub_if_no_key", True)
+    # Only fall back to stub when:
+    #   1. force_stub=True (explicit override), OR
+    #   2. API key is missing AND config says to use stub as fallback
+    # When a key IS present, always attempt OpenAI regardless of config default.
+    no_key = not api_key
+    use_stub = force_stub or (no_key and cfg["genai"].get("use_stub_if_no_key", True))
 
     if not use_stub:
         try:
