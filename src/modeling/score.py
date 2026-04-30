@@ -3,10 +3,15 @@ score.py — Load trained model and score customer cases.
 
 Supports:
   - Single customer dict → intervention score + flag
-  - Batch DataFrame → scores for all rows
+  - Batch DataFrame → scores for all rows (target column not required)
   - Model metadata retrieval
 
 Used by the FastAPI /score-customer endpoint and Streamlit dashboard.
+
+Codex fixes applied (v1.1):
+  1. score_batch: target column injected internally — callers need not supply it
+  2. score_batch: feature names loaded from artifact only when model loaded from disk
+  3. score_customer: expected_columns defaults to persisted training schema, not DB sample
 
 Run directly:
     python -m src.modeling.score
@@ -22,7 +27,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.features.build_features import build_features, get_feature_names, CATEGORICAL_FEATURES
+from src.features.build_features import build_features, CATEGORICAL_FEATURES, TARGET
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -54,7 +59,7 @@ def _score_to_risk_band(score: float) -> str:
         return "Low"
 
 
-# ── Model loader ───────────────────────────────────────────────────────────────
+# ── Model and feature name loaders ─────────────────────────────────────────────
 
 def load_model(model_path: str | None = None):
     """
@@ -81,58 +86,112 @@ def load_model(model_path: str | None = None):
     return joblib.load(path)
 
 
-# ── Feature alignment ──────────────────────────────────────────────────────────
+def _load_feature_names_from_artifact(model_path: str | None = None) -> list[str]:
+    """
+    Load feature names saved alongside the model artifact at training time.
+
+    This is the authoritative source of column order and names —
+    more reliable than inferring from a DB sample which may miss categories.
+
+    Args:
+        model_path: Base model .joblib path. Feature file is co-located.
+
+    Returns:
+        List of feature column names in training order.
+
+    Raises:
+        FileNotFoundError: If feature names artifact does not exist.
+    """
+    cfg = _load_config()
+    base_path = model_path or cfg["model"]["model_output_path"]
+    names_path = str(base_path).replace(".joblib", "_features.joblib")
+
+    if not Path(names_path).exists():
+        raise FileNotFoundError(
+            f"Feature names artifact not found at '{names_path}'. "
+            "Re-run 'python -m src.modeling.train_model' to regenerate it."
+        )
+
+    return joblib.load(names_path)
+
+
+# ── Feature preparation helpers ────────────────────────────────────────────────
 
 def _align_features(df: pd.DataFrame, expected_columns: list[str]) -> pd.DataFrame:
     """
     Ensure the feature DataFrame has exactly the columns the model expects.
 
-    Adds missing columns as 0 and drops unexpected columns.
-    This handles cases where one-hot encoding produces different columns
-    for a single-row input vs the full training set.
+    Adds missing columns as 0 (handles unseen categories in small/single inputs)
+    and drops unexpected columns. Returns columns in training order.
 
     Args:
-        df:               Feature DataFrame.
-        expected_columns: List of column names the model was trained on.
+        df:               Feature DataFrame (output of build_features).
+        expected_columns: Ordered list of column names the model was trained on.
 
     Returns:
-        Aligned DataFrame with exactly the expected columns in the right order.
+        Aligned DataFrame ready for model.predict_proba().
     """
+    df = df.copy()
     for col in expected_columns:
         if col not in df.columns:
             df[col] = 0
     return df[expected_columns]
 
 
+def _inject_target_if_missing(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Inject a dummy target column if not present in the input DataFrame.
+
+    build_features() reads the target column to split X and y.
+    In production/inference scenarios the label is unknown — injecting
+    a placeholder 0 prevents KeyError without affecting feature engineering.
+
+    Args:
+        df: Raw input DataFrame, possibly without the target column.
+
+    Returns:
+        DataFrame guaranteed to contain the target column (placeholder value=0).
+    """
+    if TARGET not in df.columns:
+        df = df.copy()
+        df[TARGET] = 0
+    return df
+
+
 def _prepare_single(customer: dict, expected_columns: list[str]) -> pd.DataFrame:
     """
-    Convert a raw customer dict into a model-ready feature row.
+    Convert a raw customer dict into a model-ready single-row feature matrix.
+
+    Handles:
+    - Missing target column (injected as placeholder — fix #1 for single path)
+    - Missing non-feature columns (customer_id, campaign_id, sent_date)
+    - Categorical encoding alignment via _align_features
 
     Args:
         customer:         Dict with raw customer field values.
-        expected_columns: Feature columns the model expects.
+        expected_columns: Ordered feature columns the model expects.
 
     Returns:
         Single-row DataFrame ready for model.predict_proba().
     """
-    # Add a dummy target so build_features doesn't error
-    customer_copy = {**customer, "needs_intervention": 0}
+    customer_copy = dict(customer)
 
-    # Add non-feature columns build_features expects to see and drop
+    # Inject placeholder target so build_features doesn't KeyError
+    customer_copy.setdefault(TARGET, 0)
+
+    # Inject placeholder non-feature columns that build_features will drop
     for col in ["customer_id", "campaign_id", "sent_date"]:
-        if col not in customer_copy:
-            customer_copy[col] = "UNKNOWN"
+        customer_copy.setdefault(col, "UNKNOWN")
 
     df = pd.DataFrame([customer_copy])
 
-    # Cast categoricals to string for get_dummies consistency
+    # Ensure categoricals are string type for consistent get_dummies behaviour
     for col in CATEGORICAL_FEATURES:
         if col in df.columns:
             df[col] = df[col].astype(str)
 
     X, _ = build_features(df)
-    X = _align_features(X, expected_columns)
-    return X
+    return _align_features(X, expected_columns)
 
 
 # ── Scoring functions ──────────────────────────────────────────────────────────
@@ -140,29 +199,34 @@ def _prepare_single(customer: dict, expected_columns: list[str]) -> pd.DataFrame
 def score_customer(
     customer: dict,
     model=None,
+    model_path: str | None = None,
     expected_columns: list[str] | None = None,
 ) -> ScoreResult:
     """
     Score a single customer case.
 
+    The target column (needs_intervention) is NOT required in the input dict.
+
     Args:
         customer:         Dict of raw customer field values.
-        model:            Trained model. Loaded from disk if None.
-        expected_columns: Feature column names. Inferred if None.
+        model:            Trained model object. Loaded from disk if None.
+        model_path:       Path to model .joblib file.
+        expected_columns: Feature column names in training order.
+                          Loaded from persisted artifact if None (fix #3) —
+                          never inferred from a DB sample.
 
     Returns:
-        ScoreResult with score, flag, and risk band.
+        ScoreResult with intervention_score, needs_intervention flag, risk_band.
     """
     cfg = _load_config()
     threshold = cfg["model"]["threshold"]
 
     if model is None:
-        model = load_model()
+        model = load_model(model_path)
 
+    # FIX #3: use persisted training schema — not a DB sample
     if expected_columns is None:
-        from src.utils.db import query_df
-        df_sample = query_df("SELECT * FROM customer_communications LIMIT 100")
-        expected_columns = get_feature_names(df_sample)
+        expected_columns = _load_feature_names_from_artifact(model_path)
 
     X = _prepare_single(customer, expected_columns)
     proba = float(model.predict_proba(X)[0, 1])
@@ -180,41 +244,58 @@ def score_batch(
     df: pd.DataFrame,
     model=None,
     model_path: str | None = None,
+    expected_columns: list[str] | None = None,
 ) -> pd.DataFrame:
     """
-    Score all rows in a DataFrame and append score columns.
+    Score all rows in a DataFrame and append prediction columns.
+
+    The target column (needs_intervention) is NOT required in the input —
+    it is injected internally as a placeholder if absent (fix #1).
+
+    Feature names are loaded from the persisted artifact only when the model
+    is also loaded from disk — if a model object is passed in directly,
+    the artifact load is skipped unless expected_columns is also None (fix #2).
 
     Args:
-        df:         DataFrame with raw customer fields.
-        model:      Trained model. Loaded from disk if None.
-        model_path: Path to model file (used if model is None).
+        df:               DataFrame with raw customer fields.
+                          Target column is optional for inference use.
+        model:            Trained model object. Loaded from disk if None.
+        model_path:       Path to model .joblib file.
+        expected_columns: Feature columns in training order.
+                          If None, loaded from artifact at model_path.
 
     Returns:
-        Original DataFrame with added columns:
-          - intervention_score
-          - predicted_intervention
-          - risk_band
+        Original DataFrame with three added columns:
+          - intervention_score      (float 0-1)
+          - predicted_intervention  (int 0 or 1)
+          - risk_band               (str: Low / Medium / High)
     """
     cfg = _load_config()
     threshold = cfg["model"]["threshold"]
 
+    # FIX #2: only hit the artifact when model itself comes from disk
     if model is None:
         model = load_model(model_path)
+        if expected_columns is None:
+            expected_columns = _load_feature_names_from_artifact(model_path)
+    else:
+        if expected_columns is None:
+            # Model provided in-memory but no columns given — try artifact
+            expected_columns = _load_feature_names_from_artifact(model_path)
 
-    # Load feature names saved during training for reliable column alignment
-    from src.modeling.train_model import load_feature_names
-    expected_columns = load_feature_names(model_path)
+    # FIX #1: inject dummy target so build_features doesn't KeyError
+    df_input = _inject_target_if_missing(df)
 
-    X, _ = build_features(df)
+    X, _ = build_features(df_input)
     X = _align_features(X, expected_columns)
 
     probas = model.predict_proba(X)[:, 1]
     flags  = (probas >= threshold).astype(int)
 
-    result = df.copy()
-    result["intervention_score"]      = probas.round(4)
-    result["predicted_intervention"]  = flags
-    result["risk_band"]               = [_score_to_risk_band(p) for p in probas]
+    result = df.copy()   # return original df without injected target
+    result["intervention_score"]     = probas.round(4)
+    result["predicted_intervention"] = flags
+    result["risk_band"]              = [_score_to_risk_band(p) for p in probas]
 
     return result
 
@@ -224,7 +305,7 @@ def score_batch(
 if __name__ == "__main__":
     from src.utils.db import query_df
 
-    print("── Single customer scoring ───────────────────────────────")
+    print("── Single customer scoring (no target column) ────────────")
     sample_customer = {
         "customer_id":             "CUST_TEST_001",
         "segment":                 "Premium",
@@ -243,6 +324,7 @@ if __name__ == "__main__":
         "tenure_months":           36,
         "days_since_last_contact": 75,
         "opt_out_flag":            0,
+        # needs_intervention intentionally omitted — real inference scenario
     }
 
     result = score_customer(sample_customer)
@@ -251,9 +333,14 @@ if __name__ == "__main__":
     print(f"  needs_intervention : {result.needs_intervention}")
     print(f"  risk_band          : {result.risk_band}")
 
-    print("\n── Batch scoring (first 10 rows from DB) ─────────────────")
-    df_sample = query_df("SELECT * FROM customer_communications LIMIT 10")
-    df_scored = score_batch(df_sample)
+    print("\n── Batch scoring WITH target column (labelled data) ──────")
+    df_labelled = query_df("SELECT * FROM customer_communications LIMIT 10")
+    df_scored = score_batch(df_labelled)
     print(df_scored[["customer_id", "intervention_score", "predicted_intervention", "risk_band"]])
+
+    print("\n── Batch scoring WITHOUT target column (inference) ───────")
+    df_inference = df_labelled.drop(columns=["needs_intervention"])
+    df_scored2 = score_batch(df_inference)
+    print(df_scored2[["customer_id", "intervention_score", "predicted_intervention", "risk_band"]])
     print(f"\n  Risk band distribution:")
-    print(df_scored["risk_band"].value_counts())
+    print(df_scored2["risk_band"].value_counts())
