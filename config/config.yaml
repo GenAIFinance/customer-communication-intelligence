@@ -72,7 +72,7 @@ genai:
   model: "gpt-3.5-turbo"
   max_tokens: 250
   temperature: 0.4
-  use_stub_if_no_key: false
+  use_stub_if_no_key: true
 
 api:
   host: "0.0.0.0"
