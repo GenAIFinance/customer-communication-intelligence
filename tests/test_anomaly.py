@@ -250,6 +250,36 @@ class TestCampaignUnderperformance:
         assert result.metadata["median_open_rate"] > 0
 
 
+
+# ── Explicit zero threshold tests (Codex fix) ─────────────────────────────────
+
+class TestExplicitZeroThresholds:
+
+    def test_engagement_drop_zero_threshold_flags_any_drop(self):
+        """threshold=0.0 should flag any drop, not fall back to config default."""
+        df = _make_dated_df(n_days=20, rows_per_day=15, engagement_drop_segment="Premium")
+        # With threshold=0.0 every drop however small should be flagged
+        result = detect_segment_engagement_drop(df, drop_threshold=0.0)
+        # Premium had injected drop — must be flagged at threshold=0
+        assert result.flagged is True
+
+    def test_complaint_spike_zero_threshold_flags_any_above_mean(self):
+        """zscore_threshold=0.0 should flag anything above mean, not use config."""
+        df = _make_dated_df(n_days=20, rows_per_day=10, complaint_spike_day=5)
+        result = detect_complaint_spike(df, zscore_threshold=0.0)
+        # At z>0 there will always be days above mean if any variance exists
+        assert isinstance(result, AnomalyResult)
+        # Key check: passing 0.0 did not silently become 2.0 (config default)
+        assert result.flagged is True
+
+    def test_campaign_ratio_zero_never_flags(self):
+        """open_rate_ratio=0.0 means cutoff=0 so no campaign can be below it."""
+        df = _make_dated_df(n_days=20, rows_per_day=30)
+        df.loc[df["campaign_id"] == "CAMP_001", "opened"] = 0
+        result = detect_campaign_underperformance(df, open_rate_ratio=0.0)
+        # cutoff = median * 0.0 = 0.0 — nothing can be below 0
+        assert result.flagged is False
+
 # ── run_all_detectors tests ────────────────────────────────────────────────────
 
 class TestRunAllDetectors:

@@ -78,7 +78,7 @@ def detect_segment_engagement_drop(
         AnomalyResult with flagged segments and their drop percentages.
     """
     cfg = _load_config()
-    threshold = drop_threshold or cfg["anomaly"]["engagement_drop_threshold"]
+    threshold = drop_threshold if drop_threshold is not None else cfg["anomaly"]["engagement_drop_threshold"]
 
     df = df.copy()
     df["sent_date"] = pd.to_datetime(df["sent_date"])
@@ -173,7 +173,7 @@ def detect_complaint_spike(
         AnomalyResult with flagged dates and their z-scores.
     """
     cfg = _load_config()
-    threshold = zscore_threshold or cfg["anomaly"]["complaint_zscore_threshold"]
+    threshold = zscore_threshold if zscore_threshold is not None else cfg["anomaly"]["complaint_zscore_threshold"]
 
     df = df.copy()
     df["sent_date"] = pd.to_datetime(df["sent_date"])
@@ -270,7 +270,7 @@ def detect_campaign_underperformance(
         AnomalyResult with flagged campaigns and their open rates.
     """
     cfg = _load_config()
-    ratio = open_rate_ratio or cfg["anomaly"]["campaign_open_rate_ratio"]
+    ratio = open_rate_ratio if open_rate_ratio is not None else cfg["anomaly"]["campaign_open_rate_ratio"]
 
     campaign_stats = (
         df.groupby("campaign_id")
