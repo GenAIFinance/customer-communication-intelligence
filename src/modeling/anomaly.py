@@ -81,7 +81,9 @@ def detect_segment_engagement_drop(
     threshold = drop_threshold if drop_threshold is not None else cfg["anomaly"]["engagement_drop_threshold"]
 
     df = df.copy()
-    df["sent_date"] = pd.to_datetime(df["sent_date"])
+    # Normalize to calendar day — prevents timestamp-level grouping if
+    # sent_date includes time-of-day components (mirrors complaint spike fix)
+    df["sent_date"] = pd.to_datetime(df["sent_date"]).dt.normalize()
 
     today = df["sent_date"].max()
     week_start     = today - timedelta(days=6)
@@ -176,10 +178,13 @@ def detect_complaint_spike(
     threshold = zscore_threshold if zscore_threshold is not None else cfg["anomaly"]["complaint_zscore_threshold"]
 
     df = df.copy()
-    df["sent_date"] = pd.to_datetime(df["sent_date"])
+    # Normalize to calendar day before groupby — if sent_date includes time-of-day
+    # components, groupby on a raw Timestamp splits the same day into many groups
+    # and z-scores are computed on per-timestamp counts instead of per-day totals.
+    df["sent_date"] = pd.to_datetime(df["sent_date"]).dt.normalize()
 
-    # Use separate aggregations so total_sent uses len (counts nulls),
-    # not count (skips nulls), avoiding inflated z-scores on partial days.
+    # total_sent uses len (all rows per day including nulls) so the denominator
+    # is not undercounted when complaint_flag has missing values.
     daily_complaints = df.groupby("sent_date")["complaint_flag"].sum().rename("complaints")
     daily_total      = df.groupby("sent_date")["complaint_flag"].apply(len).rename("total_sent")
     daily = pd.concat([daily_complaints, daily_total], axis=1).reset_index()
@@ -271,19 +276,23 @@ def detect_campaign_underperformance(
     cfg = _load_config()
     ratio = open_rate_ratio if open_rate_ratio is not None else cfg["anomaly"]["campaign_open_rate_ratio"]
 
-    # Compute total_sent as row count per campaign (len), not non-null count,
-    # so campaigns with any missing opened values are not penalised.
-    campaign_size = df.groupby("campaign_id").apply(len).rename("total_sent")
-    campaign_agg  = df.groupby("campaign_id").agg(
-        total_opened=("opened", "sum"),
+    # Use count (non-null) for both total_sent and total_opened so the denominator
+    # and numerator are aligned on the same set of rows. Using len for total_sent
+    # but sum for total_opened counts NaN opened rows in the denominator only,
+    # which falsely deflates open rates when tracking data is incomplete.
+    campaign_agg = df.groupby("campaign_id").agg(
+        total_sent=("opened", "count"),        # non-null opened rows only
+        total_opened=("opened", "sum"),        # non-null opened == 1 rows
         total_complaints=("complaint_flag", "sum"),
         avg_engagement=("engagement_score", "mean"),
-    )
-    campaign_stats = pd.concat([campaign_size, campaign_agg], axis=1).reset_index()
+    ).reset_index()
+    campaign_stats = campaign_agg
 
-    campaign_stats["open_rate"] = (
-        campaign_stats["total_opened"] / campaign_stats["total_sent"]
-    ).round(4)
+    # Guard against ZeroDivisionError when a campaign has no non-null opened values
+    campaign_stats["open_rate"] = campaign_stats.apply(
+        lambda r: round(r["total_opened"] / r["total_sent"], 4) if r["total_sent"] > 0 else 0.0,
+        axis=1,
+    )
 
     median_open_rate = campaign_stats["open_rate"].median()
     cutoff = median_open_rate * ratio
