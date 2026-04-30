@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.features.build_features import build_features, build_features_for_scoring, encode_categoricals, add_interaction_features, drop_non_features, CATEGORICAL_FEATURES, TARGET
+from src.features.build_features import build_features, build_features_for_scoring, encode_categoricals, add_interaction_features, drop_non_features, CATEGORICAL_FEATURES, CATEGORICAL_DEFAULTS, TARGET
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────

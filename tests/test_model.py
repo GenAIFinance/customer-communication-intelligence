@@ -226,6 +226,53 @@ class TestScoring:
         assert result.intervention_score > 0.5, "High-risk customer should score above 0.5"
 
 
+
+    def test_partial_payload_no_keyerror(self, trained_model):
+        """
+        Codex fix round 4: partial API payloads missing categorical fields
+        must not raise KeyError — defaults fill in cleanly.
+        """
+        model, feature_names = trained_model
+        partial = {
+            "customer_id":             "CUST_PARTIAL",
+            "segment":                 "Premium",
+            "product_type":            "Home",
+            "channel":                 "Email",
+            "opened":                  0,
+            "clicked":                 0,
+            "response_flag":           0,
+            "complaint_flag":          1,
+            "escalation_flag":         0,
+            "engagement_score":        0.12,
+            "tenure_months":           36,
+            "days_since_last_contact": 75,
+            "opt_out_flag":            0,
+            # premium_bucket and sentiment_text intentionally omitted
+        }
+        result = score_customer(partial, model=model, expected_columns=feature_names)
+        assert 0.0 <= result.intervention_score <= 1.0
+        assert result.risk_band in ["Low", "Medium", "High"]
+
+    def test_partial_batch_no_keyerror(self, trained_model):
+        """
+        Codex fix round 4: batch DataFrame missing categorical columns
+        must not raise KeyError — defaults applied row-wise.
+        """
+        import pandas as pd
+        model, feature_names = trained_model
+        df = pd.DataFrame([{
+            "customer_id": "CUST_P1", "segment": "Basic",
+            "product_type": "Auto", "channel": "SMS",
+            "opened": 0, "clicked": 0, "response_flag": 0,
+            "complaint_flag": 0, "escalation_flag": 0,
+            "engagement_score": 0.5, "tenure_months": 24,
+            "days_since_last_contact": 30, "opt_out_flag": 0,
+            # premium_bucket and sentiment_text missing
+        }])
+        scored = score_batch(df, model=model, expected_columns=feature_names)
+        assert len(scored) == 1
+        assert "intervention_score" in scored.columns
+
     def test_single_segment_batch_not_zeroed(self, trained_model):
         """
         Codex fix: homogeneous-segment batch must not silently zero categoricals.

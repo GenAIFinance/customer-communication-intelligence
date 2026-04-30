@@ -45,6 +45,17 @@ CATEGORICAL_FEATURES = [
 # Target column
 TARGET = "needs_intervention"
 
+# Safe defaults for missing categorical fields in inference payloads.
+# Values must be valid members of each category so get_dummies produces
+# a known column set — unknown strings would create unexpected dummy columns.
+CATEGORICAL_DEFAULTS = {
+    "segment":        "Standard",     # most common segment
+    "product_type":   "Auto",         # most common product
+    "channel":        "Email",        # most common channel
+    "premium_bucket": "Mid",          # middle bucket — neutral assumption
+    "sentiment_text": "neutral",      # neutral — least interventionist assumption
+}
+
 
 # ── Feature engineering functions ─────────────────────────────────────────────
 
@@ -215,6 +226,12 @@ def build_features_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["customer_id", "campaign_id", "sent_date"]:
         if col not in df.columns:
             df[col] = "UNKNOWN"
+
+    # Guard: fill any missing categorical columns with safe defaults before
+    # get_dummies indexes into them — partial API payloads raise KeyError otherwise
+    for col, default in CATEGORICAL_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
 
     # Ensure categoricals are strings for consistent get_dummies output
     for col in CATEGORICAL_FEATURES:
