@@ -124,7 +124,7 @@ def save_feature_names(feature_names: list[str], model_output_path: str | None =
     """Save feature names list alongside the model for use during scoring."""
     cfg = _load_config()
     base_path = model_output_path or cfg["model"]["model_output_path"]
-    names_path = base_path.replace(".joblib", "_features.joblib")
+    names_path = str(base_path).replace(".joblib", "_features.joblib")
     joblib.dump(feature_names, names_path)
     return names_path
 
@@ -133,7 +133,7 @@ def load_feature_names(model_output_path: str | None = None) -> list[str]:
     """Load saved feature names list."""
     cfg = _load_config()
     base_path = model_output_path or cfg["model"]["model_output_path"]
-    names_path = base_path.replace(".joblib", "_features.joblib")
+    names_path = str(base_path).replace(".joblib", "_features.joblib")
     if not Path(names_path).exists():
         raise FileNotFoundError(f"Feature names not found at '{names_path}'. Re-run training.")
     return joblib.load(names_path)
