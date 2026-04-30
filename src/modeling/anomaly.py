@@ -178,12 +178,11 @@ def detect_complaint_spike(
     df = df.copy()
     df["sent_date"] = pd.to_datetime(df["sent_date"])
 
-    daily = (
-        df.groupby("sent_date")["complaint_flag"]
-        .agg(["sum", "count"])
-        .rename(columns={"sum": "complaints", "count": "total_sent"})
-        .reset_index()
-    )
+    # Use separate aggregations so total_sent uses len (counts nulls),
+    # not count (skips nulls), avoiding inflated z-scores on partial days.
+    daily_complaints = df.groupby("sent_date")["complaint_flag"].sum().rename("complaints")
+    daily_total      = df.groupby("sent_date")["complaint_flag"].apply(len).rename("total_sent")
+    daily = pd.concat([daily_complaints, daily_total], axis=1).reset_index()
 
     if len(daily) < 3:
         return AnomalyResult(
@@ -272,16 +271,15 @@ def detect_campaign_underperformance(
     cfg = _load_config()
     ratio = open_rate_ratio if open_rate_ratio is not None else cfg["anomaly"]["campaign_open_rate_ratio"]
 
-    campaign_stats = (
-        df.groupby("campaign_id")
-        .agg(
-            total_sent=("opened", "count"),
-            total_opened=("opened", "sum"),
-            total_complaints=("complaint_flag", "sum"),
-            avg_engagement=("engagement_score", "mean"),
-        )
-        .reset_index()
+    # Compute total_sent as row count per campaign (len), not non-null count,
+    # so campaigns with any missing opened values are not penalised.
+    campaign_size = df.groupby("campaign_id").apply(len).rename("total_sent")
+    campaign_agg  = df.groupby("campaign_id").agg(
+        total_opened=("opened", "sum"),
+        total_complaints=("complaint_flag", "sum"),
+        avg_engagement=("engagement_score", "mean"),
     )
+    campaign_stats = pd.concat([campaign_size, campaign_agg], axis=1).reset_index()
 
     campaign_stats["open_rate"] = (
         campaign_stats["total_opened"] / campaign_stats["total_sent"]
