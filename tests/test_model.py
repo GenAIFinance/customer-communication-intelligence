@@ -225,6 +225,36 @@ class TestScoring:
         result = score_customer(risky_customer, model=model, expected_columns=feature_names)
         assert result.intervention_score > 0.5, "High-risk customer should score above 0.5"
 
+
+    def test_single_segment_batch_not_zeroed(self, trained_model):
+        """
+        Codex fix: homogeneous-segment batch must not silently zero categoricals.
+
+        When all rows share one segment value, drop_first=True would drop the
+        only observed dummy and _align_features would fill with 0, treating
+        every row as the baseline segment regardless of actual value.
+        This test verifies scores differ between a Premium and Basic batch.
+        """
+        from src.data.generate_data import generate_synthetic_data
+        model, feature_names = trained_model
+        df = generate_synthetic_data(n_rows=50, seed=1)
+
+        premium_batch = df[df["segment"] == "Premium"].head(5).copy()
+        basic_batch   = df[df["segment"] == "Basic"].head(5).copy()
+
+        if len(premium_batch) == 0 or len(basic_batch) == 0:
+            pytest.skip("Not enough segment variety in sample")
+
+        scored_premium = score_batch(premium_batch, model=model, expected_columns=feature_names)
+        scored_basic   = score_batch(basic_batch,   model=model, expected_columns=feature_names)
+
+        # Scores should not be identical across segments if categoricals are real
+        avg_premium = scored_premium["intervention_score"].mean()
+        avg_basic   = scored_basic["intervention_score"].mean()
+        assert avg_premium != avg_basic, (
+            "Premium and Basic batches returned identical avg scores — "
+            "categorical encoding may be zeroed"
+        )
     def test_low_risk_customer_scores_low(self, trained_model):
         """A highly engaged customer with no flags should score low."""
         model, feature_names = trained_model

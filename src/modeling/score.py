@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.features.build_features import build_features, encode_categoricals, add_interaction_features, drop_non_features, CATEGORICAL_FEATURES, TARGET
+from src.features.build_features import build_features, build_features_for_scoring, encode_categoricals, add_interaction_features, drop_non_features, CATEGORICAL_FEATURES, TARGET
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -252,9 +252,9 @@ def _prepare_single(customer: dict, expected_columns: list[str]) -> pd.DataFrame
     # preserved as a dummy column. _align_features then drops baseline columns
     # (those absent from training schema) and fills any missing ones with 0.
     # Using drop_first=True on a single row silently zeros all categoricals.
-    df = add_interaction_features(df)
-    df = encode_categoricals(df, drop_first=False)
-    X = drop_non_features(df)
+    # Use inference-safe pipeline (drop_first=False) so the single
+    # observed level per categorical is not silently dropped
+    X = build_features_for_scoring(df)
     return _align_features(X, expected_columns)
 
 
@@ -343,10 +343,11 @@ def score_batch(
     # fitted model already carries feature_names_in_ metadata
     expected_columns = _resolve_feature_names(model, model_path, expected_columns)
 
-    # FIX #1: inject dummy target so build_features doesn't KeyError
-    df_input = _inject_target_if_missing(df)
-
-    X, _ = build_features(df_input)
+    # Use inference-safe pipeline for batch — drop_first=False ensures
+    # single-level categoricals are not silently zeroed (Codex fix round 3).
+    # _inject_target_if_missing and non-feature column stubs are handled
+    # inside build_features_for_scoring.
+    X = build_features_for_scoring(df)
     X = _align_features(X, expected_columns)
 
     probas = model.predict_proba(X)[:, 1]

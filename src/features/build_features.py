@@ -185,6 +185,49 @@ def build_features_from_db(table_name: str = "customer_communications") -> tuple
     df = query_df(f"SELECT * FROM {table_name}")
     return build_features(df)
 
+def build_features_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Inference-safe feature pipeline for scoring (single row or batch).
+
+    Identical to build_features() except it uses drop_first=False during
+    categorical encoding. This ensures that even when only one level of a
+    categorical is observed in the input (single-row batch, homogeneous
+    segment, etc.) the corresponding dummy column is still created rather
+    than silently dropped. _align_features then removes any baseline columns
+    that were not part of the training schema.
+
+    Args:
+        df: Raw input DataFrame. Target column is optional — injected as 0
+            if absent so drop_non_features does not KeyError.
+
+    Returns:
+        Feature DataFrame with drop_first=False encoding, ready for
+        _align_features to trim to the exact training schema.
+    """
+    from src.features.build_features import TARGET
+    df = df.copy()
+
+    # Ensure target column exists so drop_non_features can remove it cleanly
+    if TARGET not in df.columns:
+        df[TARGET] = 0
+
+    # Ensure non-feature columns exist so drop_non_features can remove them
+    for col in ["customer_id", "campaign_id", "sent_date"]:
+        if col not in df.columns:
+            df[col] = "UNKNOWN"
+
+    # Ensure categoricals are strings for consistent get_dummies output
+    for col in CATEGORICAL_FEATURES:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+
+    df = add_interaction_features(df)
+    df = encode_categoricals(df, drop_first=False)  # safe for any batch size
+    X = drop_non_features(df)
+    return X
+
+
+
 
 def get_feature_names(df: pd.DataFrame) -> list[str]:
     """
