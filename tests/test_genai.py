@@ -149,6 +149,8 @@ class TestStubSummary:
 
 # ── build_context tests ────────────────────────────────────────────────────────
 
+class TestBuildContext:
+
 
     def test_null_engagement_score_no_crash(self):
         """build_context must not raise on None numeric values."""
@@ -160,7 +162,6 @@ class TestStubSummary:
 
     def test_nan_values_no_crash(self):
         """build_context must not raise on NaN numeric values."""
-        import math
         ctx = build_context({"engagement_score": float("nan"), "complaint_flag": float("nan")})
         assert ctx["engagement_score"] == 0.0
         assert ctx["complaint_flag"] == 0
@@ -179,8 +180,6 @@ class TestStubSummary:
         )
         assert isinstance(result.summary, str)
         assert len(result.summary) > 0
-
-class TestBuildContext:
 
     def test_returns_dict(self, high_risk_customer):
         ctx = build_context(high_risk_customer)
