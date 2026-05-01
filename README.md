@@ -13,7 +13,13 @@
 
 ## Live Demo
 
-🚀 Streamlit dashboard: https://customer-communication-intelligence-scq8nrviczgurn2djzwaok.streamlit.app/
+🚀 **[Launch Dashboard](https://customer-communication-intelligence-scq8nrviczgurn2djzwaok.streamlit.app/)**
+
+The live Streamlit dashboard includes all 4 pages:
+- Overview — KPIs, engagement distribution, segment breakdown
+- Anomaly Monitor — complaint spikes, campaign heatmap
+- Case Explorer — filterable table, model scores, drill-down
+- AI Summary — next-best-action card with risk rating
 
 ---
 
