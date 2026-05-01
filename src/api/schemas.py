@@ -7,7 +7,16 @@ and easy to version. All fields include descriptions for the auto-generated
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
+from enum import Enum
+from datetime import date
+
+
+class DetectorType(str, Enum):
+    segment_engagement_drop   = "segment_engagement_drop"
+    complaint_spike           = "complaint_spike"
+    campaign_underperformance = "campaign_underperformance"
+    all                       = "all"
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -25,12 +34,12 @@ class CustomerRequest(BaseModel):
     All fields match the dataset schema exactly.
     Categorical fields default to safe values when omitted.
     """
-    customer_id:             str   = Field("UNKNOWN",  description="Synthetic customer ID")
+    customer_id:             str   = Field("UNKNOWN",  description="Customer ID — defaults to UNKNOWN for demo use; provide real ID in production")
     segment:                 str   = Field("Standard", description="Premium / Standard / Basic")
     product_type:            str   = Field("Auto",     description="Auto / Home / Life / Health")
     channel:                 str   = Field("Email",    description="Email / SMS / Phone / Direct Mail")
     campaign_id:             str   = Field("CAMP_001", description="Campaign identifier")
-    sent_date:               str   = Field("2026-01-01", description="ISO date string")
+    sent_date:               date  = Field(date(2026, 1, 1), description="ISO date (YYYY-MM-DD)")
     opened:                  int   = Field(0, ge=0, le=1, description="1 if communication was opened")
     clicked:                 int   = Field(0, ge=0, le=1, description="1 if link was clicked")
     response_flag:           int   = Field(0, ge=0, le=1, description="1 if customer responded")
@@ -59,8 +68,8 @@ class AnomalyRequest(BaseModel):
     detector_type controls which detector to run.
     If omitted, all three detectors run.
     """
-    detector_type: Optional[str] = Field(
-        None,
+    detector_type: Optional[DetectorType] = Field(
+        DetectorType.all,
         description="segment_engagement_drop / complaint_spike / campaign_underperformance / all"
     )
 
@@ -70,7 +79,7 @@ class AnomalyItem(BaseModel):
     detector:  str  = Field(..., description="Which detector produced this result")
     flagged:   bool = Field(..., description="True if anomaly was detected")
     summary:   str  = Field(..., description="Human-readable summary")
-    anomalies: list = Field(default_factory=list, description="List of flagged items")
+    anomalies: list[dict[str, Any]] = Field(default_factory=list, description="List of flagged items with detector-specific detail")
 
 
 class AnomalyResponse(BaseModel):
@@ -87,7 +96,7 @@ class SummaryRequest(BaseModel):
     customer is required. score and anomaly_summary are optional context.
     """
     customer:        CustomerRequest = Field(..., description="Customer feature payload")
-    anomaly_summary: Optional[str]   = Field("", description="Text from anomaly detector output")
+    anomaly_summary: str             = Field("", description="Text from anomaly detector output — empty string if none")
     force_stub:      bool            = Field(False, description="Force stub fallback (no OpenAI call)")
 
 

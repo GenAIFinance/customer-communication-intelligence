@@ -15,19 +15,19 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
-from src.api.main import app, _model, _feature_names
-import src.api.main as main_module
+from src.api.main import app
 
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module", autouse=True)
 def load_model_for_tests():
-    """Load model into app state once for all tests."""
+    """Load model into app.state once for all tests."""
     from src.modeling.score import load_model
     from src.modeling.train_model import load_feature_names
-    main_module._model = load_model()
-    main_module._feature_names = load_feature_names()
+    app.state.model = load_model()
+    app.state.feature_names = load_feature_names()
+    app.state.model_error = None
 
 
 @pytest.fixture(scope="module")
@@ -79,6 +79,32 @@ class TestHealth:
         data = client.get("/health").json()
         assert isinstance(data["version"], str)
         assert len(data["version"]) > 0
+
+
+
+
+# ── GET /ready ─────────────────────────────────────────────────────────────────
+
+class TestReady:
+
+    def test_ready_returns_200_when_model_loaded(self, client):
+        response = client.get("/ready")
+        assert response.status_code == 200
+
+    def test_ready_response_has_fields(self, client):
+        data = client.get("/ready").json()
+        assert "ready" in data
+        assert "model_ok" in data
+        assert "db_ok" in data
+
+    def test_ready_model_ok_true(self, client):
+        data = client.get("/ready").json()
+        assert data["model_ok"] is True
+
+    def test_health_always_200_even_if_model_missing(self, client):
+        """Health is liveness only — must return 200 regardless of model state."""
+        response = client.get("/health")
+        assert response.status_code == 200
 
 
 # ── POST /score-customer ───────────────────────────────────────────────────────
@@ -187,6 +213,12 @@ class TestDetectAnomaly:
     def test_any_flagged_is_bool(self, client):
         data = client.post("/detect-anomaly", json={}).json()
         assert isinstance(data["any_flagged"], bool)
+
+    def test_invalid_detector_type_returns_422(self, client):
+        """Unknown detector_type must return 422 — enforced by DetectorType enum."""
+        response = client.post("/detect-anomaly",
+                               json={"detector_type": "not_a_real_detector"})
+        assert response.status_code == 422
 
     def test_total_flagged_consistent(self, client):
         data = client.post("/detect-anomaly", json={}).json()
