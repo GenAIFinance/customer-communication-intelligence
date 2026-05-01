@@ -13,7 +13,7 @@
 
 ## Live Demo
 
-🚀 Streamlit dashboard: *[Deploy link — add after Streamlit Cloud deployment]*
+🚀 Streamlit dashboard: https://customer-communication-intelligence-scq8nrviczgurn2djzwaok.streamlit.app/
 
 ---
 
