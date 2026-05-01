@@ -112,7 +112,7 @@ customer-communication-intelligence/
 │       └── db.py                 ← DuckDB connection helpers
 ├── app/
 │   └── streamlit_app.py          ← 4-page Streamlit dashboard
-└── tests/                        ← pytest test suite (100+ tests)
+└── tests/                        ← pytest test suite (158 tests)
 ```
 
 ---
@@ -289,7 +289,11 @@ pip install -r requirements.txt --prefer-binary
 ### 3. Create your .env file
 
 ```bash
+# Linux / Mac
 cp .env.example .env
+
+# Windows CMD
+copy .env.example .env
 ```
 
 Edit `.env` and set:
@@ -330,6 +334,9 @@ python -m src.genai.summarizer
 
 ## How to Run the API
 
+> **Note:** The FastAPI backend (`src/api/main.py`) is built in Day 5.
+> Run the pipeline and model training first, then start the API:
+
 ```bash
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -339,6 +346,9 @@ Interactive docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 ---
 
 ## How to Launch Streamlit
+
+> **Note:** The Streamlit dashboard (`app/streamlit_app.py`) is built in Day 6.
+> Ensure the pipeline, model, and API are running first, then launch:
 
 ```bash
 streamlit run app/streamlit_app.py
@@ -374,7 +384,7 @@ python -m pytest tests/test_anomaly.py -v
 python -m pytest tests/test_genai.py -v
 ```
 
-**Current test count:** 100+ tests across 4 modules, all passing.
+**Current test count:** 158 tests across 4 modules, all passing.
 
 ---
 
