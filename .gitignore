@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+*.duckdb
+*.duckdb.wal
+*.joblib
+data/raw/*.csv
+data/processed/*.csv
+data/processed/*.parquet
+.pytest_cache/
